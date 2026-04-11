@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maintenance-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: maintenance-ai
+  template:
+    metadata:
+      labels:
+        app: maintenance-ai
+    spec:
+      containers:
+      - name: ai-container
+        image: maintenance-app:v2
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8501
+        - containerPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: maintenance-service
+spec:
+  type: LoadBalancer
+  ports:
+    - name: dashboard
+      port: 8501
+      targetPort: 8501
+    - name: api
+      port: 8000
+      targetPort: 8000
+  selector:
+    app: maintenance-ai
