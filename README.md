@@ -215,15 +215,3 @@ Improve notebooks
 Fix bugs
 License
 This project is licensed under MIT. See LICENSE for details.
-
-### Instructions pour l'utiliser:
-1. **Copie-colle** ce bloc entier dans ton fichier `README.md`
-2. **Remplace** `https://github.com/your-username/predictive_maintenance.git` par ton vrai URL de dépôt
-3. **Ajoute** un fichier `LICENSE` avec le texte standard MIT (disponible sur [choosealicense.com](https://choosealicense.com/licenses/mit/))
-4. **Vérifie** que les chemins des images (`reports/figures/...`) correspondent à tes fichiers
-
-Ce format est:
-- **100% en anglais** comme demandé
-- **Propre** sans séparateurs inutiles
-- **Prêt à l'emploi** avec toutes les sections essentielles
-- **Optimisé** pour GitHub (badges, tableaux, images)
