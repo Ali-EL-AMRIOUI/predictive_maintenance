@@ -1,76 +1,94 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+"""
+FastAPI serving layer for RUL prediction.
+
+Delegates feature engineering and prediction to src/inference.py and
+src/evaluation.py — the exact modules the training pipeline itself uses —
+instead of reimplementing them here. The previous version rebuilt rolling
+"mean"/"std" features by copying the single raw reading into both columns
+(no actual rolling computation), and manually min-max-normalized 3 sensors
+that the model was never trained on normalized values for. Both silently
+fed the model data shaped nothing like its training distribution. Routing
+through src/ instead of duplicating logic here is what makes that class of
+bug structurally impossible, not just fixed once.
+"""
+import json
+import os
+import sys
+
 import joblib
 import pandas as pd
-import numpy as np
-import os
+from fastapi import FastAPI, HTTPException
+
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+from evaluation import compute_health_score, get_maintenance_action, get_shap_explainer  # noqa: E402
+from inference import predict_unit_health, predict_with_explanation  # noqa: E402
+from utils import load_config, resolve  # noqa: E402
+
+from schemas import EngineInput, PredictionOutput  # noqa: E402
 
 app = FastAPI(title="NASA Jet Engine RUL Predictor")
 
-# --- CHARGEMENT DU MODÈLE ---
-MODEL_PATH = "models/xgboost_model_safety.pkl"
-model = joblib.load(MODEL_PATH)
+config = load_config()
+final_model = joblib.load(resolve(config["models"]["final_model_path"]))
+model_safety = joblib.load(resolve(config["models"]["safety_model_path"]))
+explainer = get_shap_explainer(final_model)
 
-# --- CONFIGURATION DE LA NORMALISATION (MIN-MAX) ---
-# Ces valeurs permettent de transformer tes données réelles en 0-1
-SCALING_PARAMS = {
-    's2':  {'min': 641.21, 'max': 643.52},
-    's4':  {'min': 1394.8, 'max': 1423.2},
-    's11': {'min': 47.27,  'max': 48.13}
-}
+with open(resolve("data/processed/feature_reference_ranges.json")) as f:
+    reference_ranges = json.load(f)
 
-EXPECTED_FEATURES = [
-    'cycle', 'os1', 'os2', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's11', 
-    's12', 's13', 's14', 's15', 's16', 's17', 's20', 's21', 
-    'os1_roll_mean', 'os1_roll_std', 'os2_roll_mean', 'os2_roll_std', 
-    's2_roll_mean', 's2_roll_std', 's3_roll_mean', 's3_roll_std', 
-    's4_roll_mean', 's4_roll_std', 's5_roll_mean', 's5_roll_std', 
-    's6_roll_mean', 's6_roll_std', 's7_roll_mean', 's7_roll_std', 
-    's8_roll_mean', 's8_roll_std', 's9_roll_mean', 's9_roll_std', 
-    's11_roll_mean', 's11_roll_std', 's12_roll_mean', 's12_roll_std', 
-    's13_roll_mean', 's13_roll_std', 's14_roll_mean', 's14_roll_std', 
-    's15_roll_mean', 's15_roll_std', 's16_roll_mean', 's16_roll_std', 
-    's17_roll_mean', 's17_roll_std', 's20_roll_mean', 's20_roll_std', 
-    's21_roll_mean', 's21_roll_std'
-]
+WINDOW_SIZE = config["features"]["window_size"]
+MAX_RUL = config["data"]["max_rul"]
+INSPECT_THRESHOLD = config["health_score"]["inspect_threshold"]
+GROUND_THRESHOLD = config["health_score"]["ground_threshold"]
 
-class SensorInput(BaseModel):
-    sensor_data: dict
 
-@app.post("/predict")
-def predict(input_data: SensorInput):
+@app.get("/health")
+def health():
+    """Liveness/readiness probe target (wire this into deployment.yaml's
+    livenessProbe/readinessProbe once the HPA/K8s pass happens)."""
+    return {"status": "ok", "champion_model_loaded": True, "safety_model_loaded": True}
+
+
+@app.post("/predict", response_model=PredictionOutput)
+def predict(input_data: EngineInput):
     try:
-        data = input_data.sensor_data
-        
-        # 1. NORMALISATION MANUELLE (Min-Max Scaling)
-        # On ne normalise PAS le cycle, seulement les capteurs physiques
-        for s in ['s2', 's4', 's11']:
-            if s in data:
-                val = data[s]
-                s_min = SCALING_PARAMS[s]['min']
-                s_max = SCALING_PARAMS[s]['max']
-                # Formule : (x - min) / (max - min)
-                data[s] = (val - s_min) / (s_max - s_min)
-        
-        # 2. PRÉPARATION DU DATAFRAME (61 colonnes)
-        final_df = pd.DataFrame(columns=EXPECTED_FEATURES)
-        row = {}
-        for col in EXPECTED_FEATURES:
-            base_name = col.split('_')[0]
-            # On remplit avec la valeur normalisée si dispo, sinon 0.0
-            row[col] = data.get(base_name, 0.0)
-            
-        # Le cycle reste brut (important !)
-        row['cycle'] = data.get('cycle', 1)
-        
-        final_df = pd.DataFrame([row])[EXPECTED_FEATURES]
+        raw_history = pd.DataFrame([
+            {"unit": input_data.unit_id, "cycle": r.cycle, **r.sensors}
+            for r in input_data.history
+        ])
 
-        # 3. PRÉDICTION
-        prediction = model.predict(final_df)[0]
-        return {"predicted_RUL": round(float(prediction), 2)}
+        explained = predict_with_explanation(
+            raw_history, input_data.unit_id, final_model, explainer, reference_ranges,
+            window_size=WINDOW_SIZE,
+        )
+        if explained is None:
+            raise ValueError(
+                f"Could not compute a prediction for unit {input_data.unit_id} — "
+                f"check that sensor keys match training column names."
+            )
 
+        safety_rul = predict_unit_health(raw_history, input_data.unit_id, model_safety, window_size=WINDOW_SIZE)
+        if safety_rul is None:
+            raise ValueError(f"Safety model failed for unit {input_data.unit_id}.")
+
+        health_score = float(compute_health_score(pd.Series([safety_rul]), max_rul_cap=MAX_RUL).iloc[0])
+        status = get_maintenance_action(health_score, INSPECT_THRESHOLD, GROUND_THRESHOLD)
+
+        return PredictionOutput(
+            unit=input_data.unit_id,
+            predicted_RUL=round(explained["predicted_rul"], 2),
+            safety_RUL=round(safety_rul, 2),
+            health_score=round(health_score, 2),
+            status=status,
+            out_of_distribution=explained["out_of_distribution"],
+            top_reasons=explained["top_reasons"],
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
+
 
 if __name__ == "__main__":
     import uvicorn
