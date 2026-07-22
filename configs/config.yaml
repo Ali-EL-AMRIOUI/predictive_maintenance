@@ -1,0 +1,57 @@
+# Single source of truth for every parameter previously hardcoded inline in the
+# notebooks. 02 and 03 both load this file — change a value here once, it's
+# consistent everywhere (notebooks, src/train.py, and eventually api/).
+
+data:
+  raw_train_path: data/raw/train_FD001.txt
+  cleaned_train_path: data/processed/train_cleaned.csv
+  max_rul: 125 # piecewise RUL capping (standard for CMAPSS FD001)
+
+features:
+  window_size: 10 # rolling mean/std window, grouped by unit
+
+split:
+  test_size: 0.2
+  random_state: 42
+
+optuna:
+  n_trials: 25
+  n_estimators_cap: 2000
+  early_stopping_rounds: 30
+  cv_folds: 5
+
+safety_model:
+  quantile_alpha: 0.1
+
+business:
+  cost_unplanned_failure: 50000
+  cost_preventive_maintenance: 10000
+  cost_false_positive: 2000
+  critical_threshold_cycles: 5
+  alert_threshold_cycles: 10
+
+health_score:
+  inspect_threshold: 50
+  ground_threshold: 20
+
+evaluation:
+  rul_slice_bins: [[0, 20], [20, 50], [50, 100], [100, null]]
+  bootstrap_n_resamples: 1000
+  bootstrap_ci_level: 0.95
+  stress_sensor_dropout_fraction: 0.1
+  stress_gaussian_noise_sigma_pct: 0.05
+  ood_lower_quantile: 0.01
+  ood_upper_quantile: 0.99
+  ood_max_violation_ratio: 0.1
+
+mlflow:
+  tracking_db: mlflow.db # relative to project root; resolved to an absolute
+                         # sqlite:/// URI at runtime (see utils.resolve / the
+                         # notebooks' os.path.abspath call) so notebooks
+                         # (cwd=notebooks/) and src/train.py (cwd=repo root)
+                         # write to the exact same tracking store
+  experiment_name: predictive-maintenance-fd001
+
+models:
+  final_model_path: models/xgboost_final_model.pkl
+  safety_model_path: models/xgboost_model_safety.pkl
