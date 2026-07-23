@@ -1,34 +1,42 @@
-"""
-Production inference. Used by:
+"""Production inference module. Used by:
+
 - notebooks/02_model_training.ipynb (sanity check right after training)
 - src/train.py (same sanity check, non-interactive)
 - api/main.py (real-time serving — should call this, not reimplement it)
 
 Two entry points:
-- predict_unit_health(): just the number. Cheap, no SHAP overhead.
-- predict_with_explanation(): the number + an out-of-distribution flag + the
-  top local SHAP drivers ("RUL: 15 cycles, mainly driven by rising sensor_11"),
-  for operator-facing output where a bare number isn't enough to act on.
+- predict_unit_health(): returns only the predicted value. Lightweight, no SHAP overhead.
+- predict_with_explanation(): returns the predicted value + an out-of-distribution flag +
+  the top local SHAP drivers ("RUL: 15 cycles, mainly driven by rising sensor_11"),
+  tailored for operator-facing interfaces where a raw number is insufficient to act upon.
 
-Both recompute the rolling-window features themselves (via
+Both functions recompute the rolling-window features internally (via
 src.features.add_temporal_features) instead of assuming the caller already
 passed a pre-engineered dataframe. A real API receives raw-ish sensor
-history, not a dataframe with rolling stats already attached — centralizing
+history, not a dataframe with pre-calculated rolling statistics — centralizing
 that step here removes a whole class of train/serve skew.
 """
+
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
-from evaluation import check_out_of_distribution
+from evaluation import check_out_of_distribution, compute_shap_values
 from features import add_temporal_features, get_sensor_columns
 
 
-def _get_latest_features(raw_history: pd.DataFrame, unit_id, window_size: int = 10) -> pd.DataFrame | None:
-    """Filters to one unit, forward-fills gaps, recomputes rolling features the
-    same way training did, and returns the single most recent row, model-ready.
-    Returns None if the unit isn't present."""
-    unit_data = raw_history[raw_history["unit"] == unit_id]
+def _get_latest_features(
+    raw_history: pd.DataFrame, unit_id: int | str, window_size: int = 10
+) -> pd.DataFrame | None:
+    """Filters data for a single engine unit, forward-fills missing values,
+
+    recomputes rolling features identically to training time, and returns the
+    single most recent row, ready for model inference.
+
+    Returns None if the unit is not found in the raw history.
+    """
+    unit_data = raw_history[raw_history["unit"] == unit_id].copy()
     if unit_data.empty:
         return None
 
@@ -42,18 +50,18 @@ def _get_latest_features(raw_history: pd.DataFrame, unit_id, window_size: int = 
 
 def predict_unit_health(
     raw_history: pd.DataFrame,
-    unit_id,
+    unit_id: int | str,
     model,
     window_size: int = 10,
 ) -> float | None:
-    """
-    raw_history: raw (non feature-engineered) sensor readings for one or more
-    units — the same shape/columns produced by data_loader.clean_and_save_data,
-    i.e. 'unit', 'cycle', sensor/operational columns (+ 'RUL' if present, ignored).
+    """raw_history: raw (non feature-engineered) sensor readings for one or more
 
-    Simple entry point: predicted RUL, clipped at 0. Use
-    predict_with_explanation() when the caller also needs an OOD flag or the
-    reasons behind the number.
+    units — matching the format produced by data_loader.clean_and_save_data,
+    i.e., 'unit', 'cycle', sensor/operational columns (+ 'RUL' if present, ignored).
+
+    Simple entry point: returns predicted RUL, clipped at 0.0 minimum.
+    Use predict_with_explanation() when the caller also requires an OOD flag or
+    interpretability insights behind the prediction.
     """
     try:
         features = _get_latest_features(raw_history, unit_id, window_size)
@@ -70,7 +78,7 @@ def predict_unit_health(
 
 def predict_with_explanation(
     raw_history: pd.DataFrame,
-    unit_id,
+    unit_id: int | str,
     model,
     explainer,
     reference_ranges: dict,
@@ -78,27 +86,25 @@ def predict_with_explanation(
     top_n_reasons: int = 3,
     ood_violation_threshold: float = 0.1,
 ) -> dict | None:
-    """
-    Operator-facing inference: predicted RUL + an out-of-distribution flag +
-    the top local SHAP drivers of this specific prediction.
+    """Operator-facing inference: returns predicted RUL + an out-of-distribution flag
 
-    explainer: a shap.TreeExplainer(model), e.g. from
-        evaluation.get_shap_explainer(model) — build once at service start,
-        not per call, it's not cheap.
+    + the top local SHAP drivers for this specific prediction.
+
+    explainer: a shap.TreeExplainer(model) instance, e.g., from
+        evaluation.get_shap_explainer(model) — instantiate once at service startup.
     reference_ranges: output of evaluation.compute_feature_reference_ranges,
-        persisted at training time and loaded once at service start.
+        persisted at training time and loaded at service startup.
 
-    Returns a dict rather than a bare float on purpose — this is meant to be
-    read by a person, not just plotted, so it carries enough context to act on:
+    Returns a dictionary structured for operational decision-making:
         {
             "unit_id": ...,
             "predicted_rul": 15.2,
             "out_of_distribution": False,
             "ood_violation_ratio": 0.0,
-            "top_reasons": [{"feature": "sensor_11_roll_mean", "shap_impact": -4.1}, ...]
+            "top_reasons": [{"feature": "s11_roll_mean", "shap_impact": -4.1}, ...]
         }
-    A negative shap_impact pushes the prediction down (shorter RUL, more urgent);
-    positive pushes it up.
+    A negative shap_impact decreases the prediction (shorter RUL, higher urgency);
+    a positive impact increases it.
     """
     try:
         features = _get_latest_features(raw_history, unit_id, window_size)
@@ -108,11 +114,15 @@ def predict_with_explanation(
         prediction = max(0.0, float(model.predict(features)[0]))
         ood = check_out_of_distribution(features.iloc[0], reference_ranges, ood_violation_threshold)
 
-        shap_row = explainer.shap_values(features)
-        if hasattr(shap_row, "shape") and len(shap_row.shape) == 2:
+        # Compute SHAP values for the single row
+        shap_row = compute_shap_values(explainer, features)
+        if shap_row.ndim == 2:
             shap_row = shap_row[0]
         contributions = pd.Series(shap_row, index=features.columns)
-        top = contributions.reindex(contributions.abs().sort_values(ascending=False).index).head(top_n_reasons)
+
+        # Extract top N feature drivers by absolute SHAP magnitude
+        top_features = contributions.abs().sort_values(ascending=False).head(top_n_reasons).index
+        top = contributions[top_features]
 
         return {
             "unit_id": unit_id,
