@@ -22,8 +22,8 @@ stages:
       size: 1770
     - path: src/inference.py
       hash: md5
-      md5: bea97063e0047b1de7b77c7d07c79cd8
-      size: 5479
+      md5: ad93a33ad491103f3f94d0b6197be489
+      size: 5542
     - path: src/train.py
       hash: md5
       md5: 4945ae07374f22d441faea002d509733
@@ -56,11 +56,11 @@ stages:
       size: 4864
     - path: data/processed/model_results_final.csv
       hash: md5
-      md5: 278684b082a5fa907bb70aa05706f96c
-      size: 269925
+      md5: a7ab3c79f85f97c0768ff9f95f0911b3
+      size: 269842
     - path: data/processed/run_info.json
       hash: md5
-      md5: 228f41b72663d9d3512d40b0ab7a76fc
+      md5: 92ccd41e76dafc705e529820144bcebc
       size: 114
     - path: data/processed/test_features_engineered.csv
       hash: md5
@@ -72,16 +72,16 @@ stages:
       size: 3467483
     - path: mlflow.db
       hash: md5
-      md5: 18228845ecce7152e0eb94287ea5b788
+      md5: db3a8aa1b1f7598a7a230819ea9ee63a
       size: 790528
     - path: models/xgboost_final_model.pkl
       hash: md5
-      md5: 9cea7ee4f726743d819dbe75c88fd423
-      size: 941382
+      md5: b34f7cf85591429aaf99353052c1fe12
+      size: 659670
     - path: models/xgboost_model_safety.pkl
       hash: md5
-      md5: 5031dd08b56e4d2183d3949755889ea4
-      size: 484408
+      md5: f382b05c6d8e5904d26aa2acb78240aa
+      size: 1773065
   evaluate:
     cmd: jupyter nbconvert --to notebook --execute --inplace 
       notebooks/03_model_evaluation.ipynb
@@ -96,11 +96,11 @@ stages:
       size: 4864
     - path: data/processed/model_results_final.csv
       hash: md5
-      md5: 278684b082a5fa907bb70aa05706f96c
-      size: 269925
+      md5: a7ab3c79f85f97c0768ff9f95f0911b3
+      size: 269842
     - path: data/processed/run_info.json
       hash: md5
-      md5: 228f41b72663d9d3512d40b0ab7a76fc
+      md5: 92ccd41e76dafc705e529820144bcebc
       size: 114
     - path: data/processed/test_features_engineered.csv
       hash: md5
@@ -108,16 +108,16 @@ stages:
       size: 3069664
     - path: models/xgboost_final_model.pkl
       hash: md5
-      md5: 9cea7ee4f726743d819dbe75c88fd423
-      size: 941382
+      md5: b34f7cf85591429aaf99353052c1fe12
+      size: 659670
     - path: models/xgboost_model_safety.pkl
       hash: md5
-      md5: 5031dd08b56e4d2183d3949755889ea4
-      size: 484408
+      md5: f382b05c6d8e5904d26aa2acb78240aa
+      size: 1773065
     - path: notebooks/03_model_evaluation.ipynb
       hash: md5
-      md5: 8e6b6c9d10fcff89779c28603d3759e3
-      size: 805659
+      md5: 60fe1fd7fc29d5b9c1b46ce8d2f807ec
+      size: 802655
     - path: src/evaluation.py
       hash: md5
       md5: 2933194ab7c2e3681cc8e78d1ec9130a
@@ -146,7 +146,11 @@ stages:
         health_score.ground_threshold: 20
         health_score.inspect_threshold: 50
     outs:
+    - path: reports/figures/engine_1_operational_report.png
+      hash: md5
+      md5: b6acb8bee9a5ff585e8b77129fe42cfa
+      size: 275587
     - path: reports/figures/error_reliability_analysis.png
       hash: md5
-      md5: 0916fd8743a745258f9cd898629e3cde
-      size: 1514706
+      md5: 20ac08d2eb2b80681d44d19b6bf3671f
+      size: 1509584

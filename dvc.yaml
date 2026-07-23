@@ -88,4 +88,6 @@ stages:
           - evaluation.stress_gaussian_noise_sigma_pct
           - evaluation.ood_max_violation_ratio
     outs:
-      - reports/figures/error_reliability_analysis.png
+
+          - reports/figures/error_reliability_analysis.png
+          - reports/figures/engine_1_operational_report.png
