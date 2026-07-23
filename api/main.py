@@ -24,7 +24,7 @@ from evaluation import compute_health_score, get_maintenance_action, get_shap_ex
 from inference import predict_unit_health, predict_with_explanation  # noqa: E402
 from utils import load_config, resolve  # noqa: E402
 
-from schemas import EngineInput, PredictionOutput  # noqa: E402
+from .schemas import EngineInput, PredictionOutput 
 
 app = FastAPI(title="NASA Jet Engine RUL Predictor")
 
@@ -73,7 +73,8 @@ def predict(input_data: EngineInput):
 
         health_score = float(compute_health_score(pd.Series([safety_rul]), max_rul_cap=MAX_RUL).iloc[0])
         status = get_maintenance_action(health_score, INSPECT_THRESHOLD, GROUND_THRESHOLD)
-
+        if explained["out_of_distribution"]:
+            status = f"REVIEW REQUIRED — {status} (input out of training distribution)"
         return PredictionOutput(
             unit=input_data.unit_id,
             predicted_RUL=round(explained["predicted_rul"], 2),
@@ -81,6 +82,8 @@ def predict(input_data: EngineInput):
             health_score=round(health_score, 2),
             status=status,
             out_of_distribution=explained["out_of_distribution"],
+            ood_violation_ratio=explained["ood_violation_ratio"],
+            ood_violating_features=explained["ood_violating_features"],
             top_reasons=explained["top_reasons"],
         )
 
