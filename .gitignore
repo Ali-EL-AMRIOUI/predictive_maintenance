@@ -19,3 +19,4 @@ __pycache__/
 
 data/processed/*
 !data/processed/.gitkeep
+mlflow.db
