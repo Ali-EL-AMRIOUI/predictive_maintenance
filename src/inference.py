@@ -113,7 +113,6 @@ def predict_with_explanation(
 
         prediction = max(0.0, float(model.predict(features)[0]))
         ood = check_out_of_distribution(features.iloc[0], reference_ranges, ood_violation_threshold)
-
         # Compute SHAP values for the single row
         shap_row = compute_shap_values(explainer, features)
         if shap_row.ndim == 2:
@@ -129,10 +128,11 @@ def predict_with_explanation(
             "predicted_rul": prediction,
             "out_of_distribution": ood["is_ood"],
             "ood_violation_ratio": ood["violation_ratio"],
+            "ood_violating_features": ood["violating_features"],
             "top_reasons": [
                 {"feature": feat, "shap_impact": round(float(val), 3)}
                 for feat, val in top.items()
-            ],
+            ]
         }
 
     except Exception as e:

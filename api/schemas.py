@@ -49,4 +49,6 @@ class PredictionOutput(BaseModel):
     health_score: float           # safety_RUL normalized to the training RUL cap, 0-100
     status: str                   # "Normal Operation" / "Schedule Inspection" / "IMMEDIATE GROUNDING"
     out_of_distribution: bool     # True if input looks unlike anything in training data
+    ood_violation_ratio: float
+    ood_violating_features: List[str] = []
     top_reasons: Optional[List[ShapReason]] = None
