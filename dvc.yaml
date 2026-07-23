@@ -1,0 +1,91 @@
+# DVC pipeline. Two stages, mirroring the notebook split:
+#   train    -> runs src/train.py, produces models + processed artifacts
+#   evaluate -> runs 03_model_evaluation.ipynb, consumes ONLY train's persisted outputs
+#
+# This is what actually enforces "evaluate must not depend on train's in-memory
+# state" — `dvc repro` refuses to run evaluate with stale/missing train outputs,
+# and re-runs train automatically if config.yaml or the raw data changes.
+#
+# Setup (once):
+#   pip install dvc mlflow
+#   dvc init
+#   dvc add data/raw
+#   dvc remote add -d storage <your-remote-url>   # S3 / GDrive / local path — pick one
+#   dvc repro
+#
+# train calls the CLI script directly (python src/train.py) rather than
+# nbconvert — cleaner stage boundary, no notebook execution overhead, and it's
+# the same script a CI job or a cron retrain would call. notebooks/02 stays
+# for interactive exploration; it imports its Optuna objective factory from
+# src/train.py so the two never drift on what "the training pipeline" means.
+#
+# evaluate still runs the notebook via nbconvert since there's no standalone
+# evaluate.py in this repo's structure — the notebook IS the evaluation
+# deliverable (SHAP plots, dashboards, business narrative belong in a
+# reviewable notebook, not a script).
+
+stages:
+  train:
+    cmd: python src/train.py
+    deps:
+      - data/raw/train_FD001.txt
+      - src/train.py
+      - src/data_loader.py
+      - src/features.py
+      - src/evaluation.py
+      - src/inference.py
+      - src/utils.py
+    params:
+      - configs/config.yaml:
+          - data.max_rul
+          - features.window_size
+          - split.test_size
+          - split.random_state
+          - optuna.n_trials
+          - optuna.n_estimators_cap
+          - optuna.early_stopping_rounds
+          - optuna.cv_folds
+          - safety_model.quantile_alpha
+          - evaluation.ood_lower_quantile
+          - evaluation.ood_upper_quantile
+    outs:
+      - models/xgboost_final_model.pkl
+      - models/xgboost_model_safety.pkl
+      - data/processed/train_cleaned.csv
+      - data/processed/model_results_final.csv
+      - data/processed/test_features_engineered.csv
+      - data/processed/baseline_metrics.json
+      - data/processed/feature_reference_ranges.json
+      - data/processed/run_info.json
+      - mlflow.db:
+          cache: false # sqlite db is appended to across runs, not a clean stage output
+
+  evaluate:
+    cmd: jupyter nbconvert --to notebook --execute --inplace notebooks/03_model_evaluation.ipynb
+    deps:
+      - notebooks/03_model_evaluation.ipynb
+      - models/xgboost_final_model.pkl
+      - models/xgboost_model_safety.pkl
+      - data/processed/model_results_final.csv
+      - data/processed/test_features_engineered.csv
+      - data/processed/baseline_metrics.json
+      - data/processed/feature_reference_ranges.json
+      - data/processed/run_info.json
+      - src/evaluation.py
+    params:
+      - configs/config.yaml:
+          - business.cost_unplanned_failure
+          - business.cost_preventive_maintenance
+          - business.cost_false_positive
+          - business.critical_threshold_cycles
+          - business.alert_threshold_cycles
+          - health_score.inspect_threshold
+          - health_score.ground_threshold
+          - evaluation.rul_slice_bins
+          - evaluation.bootstrap_n_resamples
+          - evaluation.bootstrap_ci_level
+          - evaluation.stress_sensor_dropout_fraction
+          - evaluation.stress_gaussian_noise_sigma_pct
+          - evaluation.ood_max_violation_ratio
+    outs:
+      - reports/figures/error_reliability_analysis.png
