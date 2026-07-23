@@ -1,18 +1,19 @@
-"""
-CLI-runnable training pipeline — this is what dvc.yaml's `train` stage calls
-(`python src/train.py`). Mirrors the orchestration in
-notebooks/02_model_training.ipynb; the notebook stays useful for interactive
-exploration, this is what runs non-interactively (CI, DVC, cron retraining).
+"""CLI-runnable training pipeline — executed by dvc.yaml's `train` stage
 
-The scoring/feature logic itself (nasa_score, add_temporal_features, ...) is
-NOT duplicated here — this script and the notebook both import it from
-data_loader / features / evaluation, so there is exactly one place each of
-those can drift, instead of two.
+(`python src/train.py`). Mirrors the orchestration logic found in
+notebooks/02_model_training.ipynb; the notebook remains for interactive
+exploration, while this script serves non-interactive execution (CI/CD,
+DVC automation, scheduled retraining).
+
+Scoring and feature engineering logic (nasa_score, add_temporal_features, ...)
+are imported from data_loader, features, and evaluation modules to maintain a single
+source of truth across the codebase.
 
 Usage:
     python src/train.py
     python src/train.py --config configs/config.yaml
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,7 +32,12 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import GroupKFold, GroupShuffleSplit
 
 from data_loader import clean_and_save_data
-from evaluation import compute_feature_reference_ranges, get_shap_explainer, nasa_score, pinball_loss
+from evaluation import (
+    compute_feature_reference_ranges,
+    get_shap_explainer,
+    nasa_score,
+    pinball_loss,
+)
 from features import add_temporal_features, get_sensor_columns
 from inference import predict_unit_health, predict_with_explanation
 from utils import load_config, resolve, set_seed
@@ -48,6 +54,7 @@ class FeatureSet:
 
 
 def load_and_split(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Loads raw data, cleans it, and splits into train and test sets by engine unit."""
     clean_and_save_data(
         input_path=str(resolve(config["data"]["raw_train_path"])),
         output_path=str(resolve(config["data"]["cleaned_train_path"])),
@@ -69,6 +76,7 @@ def load_and_split(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def engineer_features(train_data: pd.DataFrame, test_data: pd.DataFrame, config: dict) -> FeatureSet:
+    """Computes rolling temporal features for train and test splits."""
     sensor_cols = get_sensor_columns(train_data, exclude=["unit", "cycle", "RUL"])
     window_size = config["features"]["window_size"]
 
@@ -85,6 +93,7 @@ def engineer_features(train_data: pd.DataFrame, test_data: pd.DataFrame, config:
 
 
 def train_baseline(features: FeatureSet, config: dict) -> tuple[dict, np.ndarray]:
+    """Trains a simple Linear Regression model to establish baseline performance."""
     baseline = LinearRegression()
     baseline.fit(features.X_train, features.y_train)
     y_baseline = baseline.predict(features.X_test)
@@ -102,10 +111,11 @@ def train_baseline(features: FeatureSet, config: dict) -> tuple[dict, np.ndarray
 
 
 def make_objective(X_train, y_train, groups, config, extra_params=None, score_fn=nasa_score):
-    """Factory shared by the champion (NASA score) and safety (pinball loss)
-    hyperparameter searches — same nested-CV structure (outer GroupKFold +
-    inner GroupShuffleSplit for early stopping, so the early-stopping
-    validation set never leaks into the CV score), different objective/scorer."""
+    """Factory function shared by the champion (NASA score) and safety (pinball loss)
+
+    hyperparameter searches. Implements nested CV (outer GroupKFold + inner
+    GroupShuffleSplit for early stopping) to prevent validation leakage into CV scores.
+    """
     extra_params = extra_params or {}
     n_estimators_cap = config["optuna"]["n_estimators_cap"]
     early_stopping = config["optuna"]["early_stopping_rounds"]
@@ -137,7 +147,9 @@ def make_objective(X_train, y_train, groups, config, extra_params=None, score_fn
             X_sub_val = X_train.iloc[tr_i].iloc[sub_val_i]
             y_sub_val = y_train.iloc[tr_i].iloc[sub_val_i]
 
-            model = xgb.XGBRegressor(**params, n_estimators=n_estimators_cap, early_stopping_rounds=early_stopping)
+            model = xgb.XGBRegressor(
+                **params, n_estimators=n_estimators_cap, early_stopping_rounds=early_stopping
+            )
             model.fit(X_sub_tr, y_sub_tr, eval_set=[(X_sub_val, y_sub_val)], verbose=False)
 
             preds = model.predict(X_train.iloc[score_i])
@@ -149,6 +161,7 @@ def make_objective(X_train, y_train, groups, config, extra_params=None, score_fn
 
 
 def train_champion_model(features: FeatureSet, train_data: pd.DataFrame, config: dict):
+    """Tunes hyper-parameters via Optuna targeting NASA score and trains the final XGBoost model."""
     study = optuna.create_study(direction="minimize")
     study.optimize(
         make_objective(features.X_train, features.y_train, train_data["unit"], config),
@@ -173,6 +186,7 @@ def train_champion_model(features: FeatureSet, train_data: pd.DataFrame, config:
 
 
 def robust_cv_check(features: FeatureSet, train_data: pd.DataFrame, best_params: dict, config: dict) -> tuple[float, float]:
+    """Runs a GroupKFold check to verify variance and stability across different folds."""
     gkf = GroupKFold(n_splits=config["optuna"]["cv_folds"])
     cv_rmse_scores = []
 
@@ -199,6 +213,7 @@ def robust_cv_check(features: FeatureSet, train_data: pd.DataFrame, best_params:
 
 
 def train_safety_model(features: FeatureSet, train_data: pd.DataFrame, X_tr, y_tr, X_val, y_val, config: dict):
+    """Trains a conservative quantile regression model (pinball loss) for lower-bound safety estimates."""
     alpha = config["safety_model"]["quantile_alpha"]
     study_safety = optuna.create_study(direction="minimize")
     study_safety.optimize(
@@ -224,6 +239,7 @@ def train_safety_model(features: FeatureSet, train_data: pd.DataFrame, X_tr, y_t
 
 
 def export_artifacts(features: FeatureSet, y_pred, y_baseline, safe_limit, run_info: dict, config: dict) -> None:
+    """Saves predictions, engineered test features, OOD reference bounds, and metadata to disk."""
     results_export = features.test_data_eng[["unit", "cycle"]].reset_index(drop=True).copy()
     results_export["RUL"] = features.y_test.reset_index(drop=True).values
     results_export["predicted_RUL"] = y_pred
@@ -252,6 +268,7 @@ def export_artifacts(features: FeatureSet, y_pred, y_baseline, safe_limit, run_i
 
 
 def run_sanity_check(test_data: pd.DataFrame, final_model, features: FeatureSet, config: dict) -> None:
+    """Executes sample predictions and explanations using src.inference entry points."""
     test_id = test_data["unit"].iloc[0]
     prediction = predict_unit_health(test_data, test_id, final_model, window_size=config["features"]["window_size"])
     status = f"{prediction:.2f} cycles" if prediction is not None else "FAILED"

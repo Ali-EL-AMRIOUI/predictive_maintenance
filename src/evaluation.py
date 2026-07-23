@@ -1,5 +1,5 @@
-"""
-Evaluation & business-logic utilities shared between:
+"""Evaluation & business-logic utilities shared between:
+
 - notebooks/02_model_training.ipynb (Optuna objective functions)
 - notebooks/03_model_evaluation.ipynb (health score, maintenance actions,
   slice analysis, robustness testing, statistical significance, SHAP)
@@ -13,10 +13,12 @@ is what caused an earlier 02/03 drift (one notebook computed health_score as a
 batch-relative min-max normalization, the other used a fixed scale — same
 engine, two different verdicts depending on which notebook you asked).
 """
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+
 
 # ----------------------------------------------------------------------------
 # Core scoring
@@ -24,8 +26,7 @@ import pandas as pd
 
 
 def nasa_score(y_true, y_pred) -> float:
-    """
-    Official asymmetric NASA CMAPSS / PHM08 scoring function.
+    """Official asymmetric NASA CMAPSS / PHM08 scoring function.
 
     Penalizes late predictions (predicted RUL > actual RUL, i.e. the model said
     "still fine" when the engine was closer to failure) more heavily than early
@@ -49,8 +50,7 @@ def pinball_loss(y_true, y_pred, alpha: float = 0.1) -> float:
 
 
 def compute_health_score(safety_rul, max_rul_cap: float) -> pd.Series:
-    """
-    Normalizes the safety RUL against the FIXED piecewise RUL cap used at
+    """Normalizes the safety RUL against the FIXED piecewise RUL cap used at
     training time (config['data']['max_rul']) — NOT against the min/max of
     whatever batch happens to be in the dataframe.
 
@@ -147,12 +147,10 @@ def inject_gaussian_noise(X: pd.DataFrame, sigma_pct: float = 0.05, seed: int | 
 
 
 def evaluate_under_perturbation(model, X_test: pd.DataFrame, y_test, perturbations: dict) -> pd.DataFrame:
-    """
-    perturbations: {"scenario_name": perturbed_X_dataframe, ...}
+    """perturbations: {"scenario_name": perturbed_X_dataframe, ...}
     Returns RMSE for the clean baseline plus each perturbation, so a reviewer
     can see exactly how much performance degrades under sensor dropout / noise
-    instead of just asserting the model is "robust".
-    """
+    instead of just asserting the model is "robust"."""
     y_test = np.asarray(y_test, dtype=float)
     rows = [{
         "scenario": "clean",
@@ -182,8 +180,7 @@ def bootstrap_metric_ci(
     ci: float = 0.95,
     seed: int = 42,
 ) -> dict:
-    """
-    Paired bootstrap on (metric(y_true, y_pred_a) - metric(y_true, y_pred_b)),
+    """Paired bootstrap on (metric(y_true, y_pred_a) - metric(y_true, y_pred_b)),
     e.g. RMSE_baseline - RMSE_champion, to get a confidence interval on the
     improvement rather than a single point estimate.
 
@@ -226,8 +223,7 @@ def bootstrap_metric_ci(
 
 
 def compute_feature_reference_ranges(X_train: pd.DataFrame, lower_q: float = 0.01, upper_q: float = 0.99) -> dict:
-    """
-    Per-feature [lower_q, upper_q] percentile ranges from training data,
+    """Per-feature [lower_q, upper_q] percentile ranges from training data,
     persisted at training time and loaded at inference time as a simple,
     interpretable OOD guard.
 
@@ -263,9 +259,51 @@ def check_out_of_distribution(features_row: pd.Series, reference_ranges: dict, m
 
 
 # ----------------------------------------------------------------------------
-# SHAP — computation lives here (imported by both notebooks and inference.py),
-# plotting stays in the notebook where it's actually looked at.
+# Business Impact & SHAP
 # ----------------------------------------------------------------------------
+
+
+def compute_business_impact(
+    y_true,
+    y_pred,
+    cost_unplanned_failure: float,
+    cost_preventive_maintenance: float,
+    cost_false_positive: float,
+    critical_threshold: float,
+    alert_threshold: float,
+) -> dict:
+    """Calculates financial net savings and failure counts.
+
+    A "missed failure" occurs when the true RUL is in the alert zone (< alert_threshold)
+    AND the model predicts an RUL above alert_threshold — regardless of exact severity.
+    The previous version only counted a miss if the true RUL was < critical_threshold,
+    leaving [critical_threshold, alert_threshold) uncounted, which is precisely where
+    a false "all clear" prediction is most dangerous.
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+
+    missed_mask = (y_true < alert_threshold) & (y_pred > alert_threshold)
+    missed_failures = int(missed_mask.sum())
+    missed_failures_critical = int((missed_mask & (y_true < critical_threshold)).sum())
+    prevented_failures = int(((y_true < alert_threshold) & (y_pred <= alert_threshold)).sum())
+    false_positives = int(((y_true >= alert_threshold) & (y_pred <= alert_threshold)).sum())
+
+    gains = prevented_failures * (cost_unplanned_failure - cost_preventive_maintenance)
+    loss_missed_failures = missed_failures * cost_unplanned_failure
+    loss_false_positives = false_positives * cost_false_positive
+    net_savings = gains - loss_missed_failures - loss_false_positives
+
+    return {
+        "missed_failures": missed_failures,
+        "missed_failures_critical": missed_failures_critical,
+        "prevented_failures": prevented_failures,
+        "false_positives": false_positives,
+        "gains": float(gains),
+        "loss_missed_failures": float(loss_missed_failures),
+        "loss_false_positives": float(loss_false_positives),
+        "net_savings": float(net_savings),
+    }
 
 
 def get_shap_explainer(model):

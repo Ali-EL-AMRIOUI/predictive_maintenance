@@ -1,11 +1,12 @@
-"""
-Feature engineering utilities shared between:
+"""Feature engineering utilities shared between:
+
 - notebooks/02_model_training.ipynb (training-time feature matrix)
 - src/inference.py (production inference — must reproduce the exact same features)
 
 Centralizing this here is what guarantees training/serving consistency:
 both call the same function instead of maintaining two implementations.
 """
+
 from __future__ import annotations
 
 import pandas as pd
@@ -22,8 +23,8 @@ def add_temporal_features(
     sensor_cols: list[str],
     window_size: int = 10,
 ) -> pd.DataFrame:
-    """
-    Computes rolling mean and rolling std for each sensor column, grouped by 'unit'
+    """Computes rolling mean and rolling std for each sensor column, grouped by 'unit'
+
     so that the rolling window never crosses from one engine's history into another's.
 
     Rolling is trailing (backward-looking) by construction (pandas default), so this
