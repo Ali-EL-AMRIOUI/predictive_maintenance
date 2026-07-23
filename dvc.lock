@@ -1,0 +1,152 @@
+schema: '2.0'
+stages:
+  train:
+    cmd: python src/train.py
+    deps:
+    - path: data/raw/train_FD001.txt
+      hash: md5
+      md5: 259f340bac32ce6fa8894815600fa757
+      size: 3515356
+      isexec: true
+    - path: src/data_loader.py
+      hash: md5
+      md5: 6081b4125d8b249825285393f473e491
+      size: 1475
+    - path: src/evaluation.py
+      hash: md5
+      md5: 2933194ab7c2e3681cc8e78d1ec9130a
+      size: 13940
+    - path: src/features.py
+      hash: md5
+      md5: 0ee93f886cf17cc78e866a49820c9f39
+      size: 1770
+    - path: src/inference.py
+      hash: md5
+      md5: bea97063e0047b1de7b77c7d07c79cd8
+      size: 5479
+    - path: src/train.py
+      hash: md5
+      md5: 4945ae07374f22d441faea002d509733
+      size: 16066
+    - path: src/utils.py
+      hash: md5
+      md5: 9eab3f933e1a0ae9d8f12c30b1f3a7dc
+      size: 1479
+    params:
+      configs/config.yaml:
+        data.max_rul: 125
+        evaluation.ood_lower_quantile: 0.01
+        evaluation.ood_upper_quantile: 0.99
+        features.window_size: 10
+        optuna.cv_folds: 5
+        optuna.early_stopping_rounds: 30
+        optuna.n_estimators_cap: 2000
+        optuna.n_trials: 25
+        safety_model.quantile_alpha: 0.1
+        split.random_state: 42
+        split.test_size: 0.2
+    outs:
+    - path: data/processed/baseline_metrics.json
+      hash: md5
+      md5: 9315291e17f93b821ec635e868c0e94c
+      size: 115
+    - path: data/processed/feature_reference_ranges.json
+      hash: md5
+      md5: b5c1f067f86192da40874efddfa0306e
+      size: 4864
+    - path: data/processed/model_results_final.csv
+      hash: md5
+      md5: 278684b082a5fa907bb70aa05706f96c
+      size: 269925
+    - path: data/processed/run_info.json
+      hash: md5
+      md5: 228f41b72663d9d3512d40b0ab7a76fc
+      size: 114
+    - path: data/processed/test_features_engineered.csv
+      hash: md5
+      md5: 62d783dd4ea24018f708d506ebd2a905
+      size: 3069664
+    - path: data/processed/train_cleaned.csv
+      hash: md5
+      md5: 8b6b49ae7221aba6a58090e4e8b0f4ee
+      size: 3467483
+    - path: mlflow.db
+      hash: md5
+      md5: 18228845ecce7152e0eb94287ea5b788
+      size: 790528
+    - path: models/xgboost_final_model.pkl
+      hash: md5
+      md5: 9cea7ee4f726743d819dbe75c88fd423
+      size: 941382
+    - path: models/xgboost_model_safety.pkl
+      hash: md5
+      md5: 5031dd08b56e4d2183d3949755889ea4
+      size: 484408
+  evaluate:
+    cmd: jupyter nbconvert --to notebook --execute --inplace 
+      notebooks/03_model_evaluation.ipynb
+    deps:
+    - path: data/processed/baseline_metrics.json
+      hash: md5
+      md5: 9315291e17f93b821ec635e868c0e94c
+      size: 115
+    - path: data/processed/feature_reference_ranges.json
+      hash: md5
+      md5: b5c1f067f86192da40874efddfa0306e
+      size: 4864
+    - path: data/processed/model_results_final.csv
+      hash: md5
+      md5: 278684b082a5fa907bb70aa05706f96c
+      size: 269925
+    - path: data/processed/run_info.json
+      hash: md5
+      md5: 228f41b72663d9d3512d40b0ab7a76fc
+      size: 114
+    - path: data/processed/test_features_engineered.csv
+      hash: md5
+      md5: 62d783dd4ea24018f708d506ebd2a905
+      size: 3069664
+    - path: models/xgboost_final_model.pkl
+      hash: md5
+      md5: 9cea7ee4f726743d819dbe75c88fd423
+      size: 941382
+    - path: models/xgboost_model_safety.pkl
+      hash: md5
+      md5: 5031dd08b56e4d2183d3949755889ea4
+      size: 484408
+    - path: notebooks/03_model_evaluation.ipynb
+      hash: md5
+      md5: 8e6b6c9d10fcff89779c28603d3759e3
+      size: 805659
+    - path: src/evaluation.py
+      hash: md5
+      md5: 2933194ab7c2e3681cc8e78d1ec9130a
+      size: 13940
+    params:
+      configs/config.yaml:
+        business.alert_threshold_cycles: 10
+        business.cost_false_positive: 2000
+        business.cost_preventive_maintenance: 10000
+        business.cost_unplanned_failure: 50000
+        business.critical_threshold_cycles: 5
+        evaluation.bootstrap_ci_level: 0.95
+        evaluation.bootstrap_n_resamples: 1000
+        evaluation.ood_max_violation_ratio: 0.1
+        evaluation.rul_slice_bins:
+        - - 0
+          - 20
+        - - 20
+          - 50
+        - - 50
+          - 100
+        - - 100
+          - 
+        evaluation.stress_gaussian_noise_sigma_pct: 0.05
+        evaluation.stress_sensor_dropout_fraction: 0.1
+        health_score.ground_threshold: 20
+        health_score.inspect_threshold: 50
+    outs:
+    - path: reports/figures/error_reliability_analysis.png
+      hash: md5
+      md5: 0916fd8743a745258f9cd898629e3cde
+      size: 1514706
