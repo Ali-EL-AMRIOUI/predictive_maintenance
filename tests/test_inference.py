@@ -77,8 +77,9 @@ def test_predict_with_explanation_returns_expected_shape(synthetic_history, trai
     )
     assert result is not None
     assert set(result.keys()) == {
-        "unit_id", "predicted_rul", "out_of_distribution", "ood_violation_ratio", "top_reasons",
-    }
+    "unit_id", "predicted_rul", "out_of_distribution", "ood_violation_ratio",
+    "ood_violating_features", "top_reasons",
+}
     assert len(result["top_reasons"]) == 3
     for reason in result["top_reasons"]:
         assert set(reason.keys()) == {"feature", "shap_impact"}
