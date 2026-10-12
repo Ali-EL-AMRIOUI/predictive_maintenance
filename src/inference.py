@@ -66,7 +66,9 @@ def predict_unit_health(
         features = _get_latest_features(raw_history, unit_id, window_size)
         if features is None:
             raise ValueError(f"Unit ID {unit_id} not found in provided history.")
-
+        # --- CORRECTION : Forcer l'ordre des colonnes ---
+        if hasattr(model, "feature_names_in_"):
+            features = features[list(model.feature_names_in_)]
         prediction = model.predict(features)[0]
         return max(0.0, float(prediction))
 
@@ -109,7 +111,9 @@ def predict_with_explanation(
         features = _get_latest_features(raw_history, unit_id, window_size)
         if features is None:
             raise ValueError(f"Unit ID {unit_id} not found in provided history.")
-
+          # --- CORRECTION : Forcer l'ordre des colonnes ---
+        if hasattr(model, "feature_names_in_"):
+            features = features[list(model.feature_names_in_)]
         prediction = max(0.0, float(model.predict(features)[0]))
         ood = check_out_of_distribution(features.iloc[0], reference_ranges, ood_violation_threshold)
         # Compute SHAP values for the single row
