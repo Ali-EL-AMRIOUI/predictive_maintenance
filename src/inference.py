@@ -19,7 +19,6 @@ that step here removes a whole class of train/serve skew.
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 from evaluation import check_out_of_distribution, compute_shap_values
@@ -71,8 +70,8 @@ def predict_unit_health(
         prediction = model.predict(features)[0]
         return max(0.0, float(prediction))
 
-    except Exception as e:
-        print(f"Error during inference for Unit {unit_id}: {str(e)}")
+    except Exception as e:  # noqa: BLE001
+        print(f"Error during inference for Unit {unit_id}: {e!s}")
         return None
 
 
@@ -135,6 +134,6 @@ def predict_with_explanation(
             ]
         }
 
-    except Exception as e:
-        print(f"Error during explained inference for Unit {unit_id}: {str(e)}")
+    except Exception as e:  # noqa: BLE001
+        print(f"Error during explained inference for Unit {unit_id}: {e!s}")
         return None

@@ -9,3 +9,4 @@ uvicorn
 streamlit
 joblib
 plotly
+shap
