@@ -13,7 +13,6 @@ actual src/data_loader.py + src/features.py produce at training time. This
 API passes them straight through to src/inference.py, which reproduces the
 training feature pipeline exactly regardless of what those names are.
 """
-from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -21,12 +20,12 @@ from pydantic import BaseModel, Field
 class CycleReading(BaseModel):
     """One cycle of raw sensor/operational-setting readings for one engine."""
     cycle: int
-    sensors: Dict[str, float]  # e.g. {"s2": 642.1, "s3": 1589.7, "os1": 0.001, ...}
+    sensors: dict[str, float]  # e.g. {"s2": 642.1, "s3": 1589.7, "os1": 0.001, ...}
 
 
 class EngineInput(BaseModel):
     unit_id: int
-    history: List[CycleReading] = Field(
+    history: list[CycleReading] = Field(
         ..., min_length=1,
         description="Recent cycles for this engine, oldest first. Send at "
                      "least `window_size` cycles (see config.yaml) for the "
@@ -50,5 +49,5 @@ class PredictionOutput(BaseModel):
     status: str                   # "Normal Operation" / "Schedule Inspection" / "IMMEDIATE GROUNDING"
     out_of_distribution: bool     # True if input looks unlike anything in training data
     ood_violation_ratio: float
-    ood_violating_features: List[str] = []
-    top_reasons: Optional[List[ShapReason]] = None
+    ood_violating_features: list[str] = []
+    top_reasons: list[ShapReason] | None = None

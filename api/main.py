@@ -20,11 +20,11 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
-from evaluation import compute_health_score, get_maintenance_action, get_shap_explainer  # noqa: E402
-from inference import predict_unit_health, predict_with_explanation  # noqa: E402
-from utils import load_config, resolve  # noqa: E402
+from evaluation import compute_health_score, get_maintenance_action, get_shap_explainer
+from inference import predict_unit_health, predict_with_explanation
+from utils import load_config, resolve
 
-from .schemas import EngineInput, PredictionOutput 
+from .schemas import EngineInput, PredictionOutput
 
 app = FastAPI(title="NASA Jet Engine RUL Predictor")
 
@@ -89,7 +89,7 @@ def predict(input_data: EngineInput):
 
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Internal error: {e}")
 
 
