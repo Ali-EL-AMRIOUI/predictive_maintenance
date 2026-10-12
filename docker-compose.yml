@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  # 1. Le Backend (FastAPI)
+  api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: predictive_api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./configs:/app/configs
+
+  # 2. Le Frontend (Streamlit)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit # Nous allons créer ce fichier
+    container_name: predictive_frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://api:8000 # C'est ici qu'on dit à Streamlit où se trouve l'API
+    depends_on:
+      - api # On demande à Docker de lancer l'API avant l'interface

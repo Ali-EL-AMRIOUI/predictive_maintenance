@@ -10,13 +10,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-
 RUN pip install --default-timeout=1000 --no-cache-dir -r requirements.txt
 
 COPY . .
 
 EXPOSE 8000
-EXPOSE 8501
 
-
-CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port 8000 & streamlit run app/streamlit_app.py --server.port=8501 --server.address=0.0.0.0"]
+# Start ONLY the FastAPI server
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

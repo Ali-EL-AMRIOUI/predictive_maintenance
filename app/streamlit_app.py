@@ -373,7 +373,16 @@ elif page == "🔍 Engine Prediction":
         st.plotly_chart(gauge, use_container_width=True)
 
         st.subheader("Maintenance Recommendation")
-        status_badge(status)
+        
+        # --- FIX APPLIED HERE ---
+        badge_icon, badge_type = status_badge(status)
+        if badge_type == "error":
+            st.error(f"{badge_icon} **{status}**")
+        elif badge_type == "warning":
+            st.warning(f"{badge_icon} **{status}**")
+        else:
+            st.success(f"{badge_icon} **{status}**")
+        # ------------------------
 
         st.subheader("Input Validation")
         if ood:
