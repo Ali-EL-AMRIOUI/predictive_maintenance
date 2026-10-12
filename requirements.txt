@@ -8,4 +8,4 @@ fastapi
 uvicorn
 streamlit
 joblib
-plotly
+plotlyshap
