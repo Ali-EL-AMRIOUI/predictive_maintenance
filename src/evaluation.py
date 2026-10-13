@@ -323,7 +323,7 @@ def check_quantile_crossing(predicted_rul, safety_rul) -> dict:
     buffer = predicted_rul - safety_rul  # positive = safety is below champion, as intended
     crossed = buffer < 0
     return {
-        "n": int(len(buffer)),
+        "n": len(buffer),
         "crossing_rate": float(crossed.mean()) if len(buffer) else 0.0,
         "mean_buffer": float(buffer.mean()) if len(buffer) else 0.0,
         "worst_crossing": float(buffer.min()) if len(buffer) else 0.0,
