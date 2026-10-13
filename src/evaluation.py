@@ -305,6 +305,33 @@ def compute_business_impact(
     }
 
 
+def check_quantile_crossing(predicted_rul, safety_rul) -> dict:
+    """Checks, row by row, whether the safety (lower-quantile) model actually
+    stays below the champion (point-estimate) model — the quantile-crossing
+    failure mode where the "conservative" model ends up less conservative
+    than the number it's supposed to bound.
+
+    A negative mean buffer (seen in 02_model_training.ipynb:
+    "WARNING: Safety limit too high") only shows the aggregate; it can't
+    distinguish "every row crosses by a little" from "most rows are fine but
+    a few cross badly" — those call for different fixes (recalibrate alpha,
+    vs. investigate specific engines/regimes). This returns the per-row rate
+    and the worst case so that distinction is visible, not just the average.
+    """
+    predicted_rul = np.asarray(predicted_rul, dtype=float)
+    safety_rul = np.asarray(safety_rul, dtype=float)
+    buffer = predicted_rul - safety_rul  # positive = safety is below champion, as intended
+    crossed = buffer < 0
+    return {
+        "n": int(len(buffer)),
+        "crossing_rate": float(crossed.mean()) if len(buffer) else 0.0,
+        "mean_buffer": float(buffer.mean()) if len(buffer) else 0.0,
+        "worst_crossing": float(buffer.min()) if len(buffer) else 0.0,
+        "mean_champion_rul": float(predicted_rul.mean()) if len(buffer) else 0.0,
+        "mean_safety_rul": float(safety_rul.mean()) if len(buffer) else 0.0,
+    }
+
+
 def get_shap_explainer(model):
     """TreeExplainer setup, factored out so it's built once (e.g. at API
     startup) rather than re-created on every inference call. Imports shap

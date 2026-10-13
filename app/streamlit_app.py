@@ -40,12 +40,36 @@ st.set_page_config(
 API_HOST = os.getenv("API_URL", "http://localhost:8000")
 PREDICT_ENDPOINT = f"{API_HOST}/predict"
 HEALTH_ENDPOINT = f"{API_HOST}/health"
+CONFIG_ENDPOINT = f"{API_HOST}/config"
 
-# Application Thresholds (Defaults)
-WINDOW_SIZE = 5
+# Fallback values only — used if the API is unreachable at startup.
+WINDOW_SIZE = 10
 MAX_RUL = 125
-INSPECT_THRESHOLD = 30
-GROUND_THRESHOLD = 10
+INSPECT_THRESHOLD = 50
+GROUND_THRESHOLD = 20
+
+@st.cache_data(ttl=60)
+def _fetch_config():
+    """Pulls real thresholds from the API (sourced from config.yaml) so this
+    app can't silently drift from what the models were actually trained/tuned
+    against."""
+    try:
+        r = requests.get(CONFIG_ENDPOINT, timeout=3)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return {
+            "window_size": WINDOW_SIZE,
+            "max_rul": MAX_RUL,
+            "inspect_threshold": INSPECT_THRESHOLD,
+            "ground_threshold": GROUND_THRESHOLD,
+        }
+
+_cfg = _fetch_config()
+WINDOW_SIZE = _cfg["window_size"]
+MAX_RUL = _cfg["max_rul"]
+INSPECT_THRESHOLD = _cfg["inspect_threshold"]
+GROUND_THRESHOLD = _cfg["ground_threshold"]
 
 ###############################################################################
 # GLOBAL THEME
@@ -61,13 +85,27 @@ html, body, [data-testid="stAppViewContainer"] {
 section[data-testid="stSidebar"] {
     background: #0d1b2a;
 }
+
+/* --- CORRECTION DU BUG DE TEXTE BLANC DANS LES INPUTS --- */
+div[data-baseweb="input"] > div, 
+div[data-baseweb="textarea"] > textarea,
+div[data-baseweb="base-input"] > input {
+    background-color: #10253c !important;
+    color: white !important;
+    -webkit-text-fill-color: white !important;
+}
+div[data-baseweb="textarea"] > textarea:focus,
+div[data-baseweb="base-input"] > input:focus {
+    background-color: #1a365d !important;
+}
+
 .block-container {
     padding-top: 1.5rem;
     padding-bottom: 2rem;
     max-width: 1400px;
 }
 h1, h2, h3 {
-    color: white;
+    color: white !important;
 }
 .metric-card {
     background: #10253c;
@@ -98,7 +136,6 @@ h1, h2, h3 {
 # HELPERS
 ###############################################################################
 
-
 @st.cache_data(ttl=5)
 def check_api():
     """Ping FastAPI every 5 seconds."""
@@ -110,7 +147,6 @@ def check_api():
     except Exception:
         return False, {}
 
-
 def health_color(score: float):
     if score >= 70:
         return "green"
@@ -118,17 +154,14 @@ def health_color(score: float):
         return "orange"
     return "red"
 
-
 def status_badge(status):
     status_upper = status.upper()
-
     if "GROUND" in status_upper:
         return "🔴", "error"
     elif "REVIEW REQUIRED" in status_upper or "INSPECTION" in status_upper:
         return "🟠", "warning"
     else:
         return "🟢", "success"
-
 
 ###############################################################################
 # SIDEBAR
@@ -156,7 +189,7 @@ with st.sidebar:
     st.subheader("Navigation")
 
     page = st.radio(
-        "",
+        "Navigation",
         [
             "🏠 Dashboard",
             "🔍 Engine Prediction",
@@ -164,6 +197,7 @@ with st.sidebar:
             "⚙️ Settings",
             "ℹ️ About",
         ],
+        label_visibility="collapsed",
     )
 
     st.divider()
@@ -221,7 +255,7 @@ if page == "🏠 Dashboard":
             )
         )
         fig.update_layout(height=420)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     with right:
         fleet = pd.DataFrame(
@@ -238,7 +272,7 @@ if page == "🏠 Dashboard":
             text="Engines",
         )
         fig.update_layout(height=420, showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     st.divider()
     st.subheader("Platform Overview")
@@ -277,7 +311,7 @@ elif page == "🔍 Engine Prediction":
     )
 
     st.divider()
-    st.subheader("Engine History")
+    st.subheader("Engine History & Stress Test")
 
     history = []
     for i in range(history_length):
@@ -288,7 +322,7 @@ elif page == "🔍 Engine Prediction":
             sensor_json = st.text_area(
                 "Sensors (JSON)",
                 key=f"sensors_{i}",
-                height=200,
+                height=150,
                 value="""{
 "s1":0, "s2":641.82, "s3":1589.70, "s4":1400.60, "s5":14.62,
 "s6":21.61, "s7":554.36, "s8":2388.06, "s9":9046.19, "s10":1.30,
@@ -300,6 +334,19 @@ elif page == "🔍 Engine Prediction":
 
             try:
                 sensors = json.loads(sensor_json)
+                
+                # --- LE SIMULATEUR DE PANNE (Seulement sur le dernier cycle) ---
+                if i == history_length - 1:
+                    st.markdown("**(Interactive) Simulateur de dérive thermique**")
+                    s4_offset = st.slider(
+                        "Surchauffe forcée de la turbine (s4) - Stress Test", 
+                        min_value=0.0, max_value=80.0, value=0.0, step=2.0
+                    )
+                    if s4_offset > 0:
+                        sensors["s4"] += s4_offset
+                        st.warning(f"🔥 Température s4 simulée modifiée à : {sensors['s4']:.2f}")
+                # ---------------------------------------------------------------
+                        
             except Exception:
                 st.error("Invalid JSON format.")
                 sensors = {}
@@ -307,7 +354,7 @@ elif page == "🔍 Engine Prediction":
             history.append({"cycle": int(cycle), "sensors": sensors})
 
     st.divider()
-    predict_button = st.button("🚀 Predict Engine Health", use_container_width=True)
+    predict_button = st.button("🚀 Predict Engine Health", width='stretch')
 
     if predict_button:
         payload = {"unit_id": int(unit_id), "history": history}
@@ -335,7 +382,7 @@ elif page == "🔍 Engine Prediction":
 
         predicted_rul = result.get("predicted_RUL", 0)
         safety_rul = result.get("safety_RUL", 0)
-        health_score = result.get("health_score", 0)
+        health_score = result.get("health_score", 0.0)
         status = result.get("status", "UNKNOWN")
         ood = result.get("out_of_distribution", False)
         violation_ratio = result.get("ood_violation_ratio", 0.0)
@@ -347,34 +394,55 @@ elif page == "🔍 Engine Prediction":
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Predicted RUL", f"{predicted_rul:.2f}")
         c2.metric("Safety RUL", f"{safety_rul:.2f}")
-        c3.metric("Health Score", f"{health_score:.1f} %")
+        c3.metric(
+            "Health Score",
+            f"{health_score:.1f} %",
+            help=(
+                "Score forcé à 0.0 : l'entrée est hors distribution d'entraînement "
+                "(ratio de violation {:.1%}). Capteurs à inspecter avant toute "
+                "décision de maintenance.".format(violation_ratio)
+                if ood else None
+            ),
+        )
         c4.metric("Latency", f"{latency:.0f} ms")
+
+        if ood:
+            st.caption(
+                "⚠️ Score forcé à 0.0 par l'API : l'entrée est hors distribution "
+                f"d'entraînement ({violation_ratio:.1%} des features concernées). "
+                "Donnée capteur invalide ou inhabituelle — inspecter avant d'agir."
+            )
 
         st.divider()
 
-        # Gauge
         gauge = go.Figure(
             go.Indicator(
                 mode="gauge+number",
                 value=health_score,
-                title={"text": "Engine Health Score"},
+                title={
+                    "text": "Engine Health Score"
+                    + (" 🚨 INVALID SENSOR DATA" if ood else "")
+                },
                 gauge={
                     "axis": {"range": [0, 100]},
-                    "bar": {"color": "royalblue"},
-                    "steps": [
-                        {"range": [0, 20], "color": "#7f0000"},
-                        {"range": [20, 50], "color": "#d97706"},
-                        {"range": [50, 100], "color": "#16a34a"},
-                    ],
+                    "bar": {"color": "gray" if ood else "royalblue"},
+                    "steps": (
+                        [{"range": [0, 100], "color": "#2a2a2a"}]
+                        if ood
+                        else [
+                            {"range": [0, 20], "color": "#7f0000"},
+                            {"range": [20, 50], "color": "#d97706"},
+                            {"range": [50, 100], "color": "#16a34a"},
+                        ]
+                    ),
                 },
             )
         )
         gauge.update_layout(height=350)
-        st.plotly_chart(gauge, use_container_width=True)
+        st.plotly_chart(gauge, width='stretch')
 
         st.subheader("Maintenance Recommendation")
         
-        # --- FIX APPLIED HERE ---
         badge_icon, badge_type = status_badge(status)
         if badge_type == "error":
             st.error(f"{badge_icon} **{status}**")
@@ -382,7 +450,6 @@ elif page == "🔍 Engine Prediction":
             st.warning(f"{badge_icon} **{status}**")
         else:
             st.success(f"{badge_icon} **{status}**")
-        # ------------------------
 
         st.subheader("Input Validation")
         if ood:
@@ -416,7 +483,7 @@ elif page == "🔍 Engine Prediction":
                 color_continuous_scale="RdYlGn",
             )
             fig.update_layout(height=420, coloraxis_showscale=False)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
         with st.expander("Prediction JSON"):
             st.json(result)
@@ -434,11 +501,11 @@ elif page == "📊 Fleet Analysis":
     if uploaded_file is not None:
         fleet = pd.read_csv(uploaded_file)
         st.success(f"{len(fleet)} rows loaded.")
-        st.dataframe(fleet.head(), use_container_width=True)
+        st.dataframe(fleet.head(), width='stretch')
 
         st.divider()
 
-        if st.button("🚀 Analyze Fleet", use_container_width=True):
+        if st.button("🚀 Analyze Fleet", width='stretch'):
             progress = st.progress(0)
             predictions = []
 
@@ -480,20 +547,39 @@ elif page == "📊 Fleet Analysis":
             result_df["Health_Score"] = [
                 p["health_score"] if p else np.nan for p in predictions
             ]
+            result_df["Out_of_Distribution"] = [
+                bool(p["out_of_distribution"]) if p else None for p in predictions
+            ]
             result_df["Status"] = [
                 p["status"] if p else "FAILED" for p in predictions
             ]
 
             st.success("Fleet analysis completed.")
-            st.dataframe(result_df, use_container_width=True)
+            st.dataframe(result_df, width='stretch')
 
             st.divider()
 
-            c1, c2, c3 = st.columns(3)
+            valid_health = result_df.loc[~result_df.Out_of_Distribution.fillna(False), "Health_Score"]
+
+            c1, c2, c3, c4 = st.columns(4)
             c1.metric("Fleet Size", len(result_df))
-            c2.metric("Average Health", f"{result_df.Health_Score.mean():.1f} %")
+            c2.metric(
+                "Average Health",
+                f"{valid_health.mean():.1f} %" if len(valid_health) else "N/A",
+                help="Moyenne calculée uniquement sur les moteurs dont l'entrée "
+                     "n'est pas hors distribution — les scores forcés à 0.0 "
+                     "(capteurs invalides) sont exclus pour ne pas fausser la moyenne.",
+            )
             critical = (result_df.Status == "IMMEDIATE GROUNDING").sum()
             c3.metric("Critical Engines", int(critical))
+            ood_count = int(result_df.Out_of_Distribution.fillna(False).sum())
+            c4.metric("Out-of-Distribution", ood_count)
+            if ood_count:
+                st.warning(
+                    f"⚠️ {ood_count} moteur(s) hors distribution d'entraînement — "
+                    "leur Health_Score est forcé à 0.0 (donnée capteur invalide) "
+                    "et n'est pas inclus dans la moyenne ci-dessus."
+                )
 
             fig = px.histogram(
                 result_df,
@@ -501,7 +587,7 @@ elif page == "📊 Fleet Analysis":
                 nbins=30,
                 title="Predicted RUL Distribution",
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
             fig = px.scatter(
                 result_df,
@@ -511,7 +597,7 @@ elif page == "📊 Fleet Analysis":
                 hover_data=["unit"] if "unit" in result_df.columns else None,
                 title="Fleet Health Overview",
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
             csv = result_df.to_csv(index=False).encode("utf-8")
             st.download_button(
@@ -519,7 +605,7 @@ elif page == "📊 Fleet Analysis":
                 csv,
                 file_name="fleet_report.csv",
                 mime="text/csv",
-                use_container_width=True,
+                width='stretch',
             )
 
 ###############################################################################
@@ -547,6 +633,7 @@ elif page == "⚙️ Settings":
 
     st.divider()
     st.subheader("Configuration")
+    st.caption("Loaded live from the API's /config endpoint (config.yaml) — not hardcoded here.")
     st.write(f"Window Size : **{WINDOW_SIZE}**")
     st.write(f"Maximum RUL : **{MAX_RUL}**")
     st.write(f"Inspection Threshold : **{INSPECT_THRESHOLD}**")

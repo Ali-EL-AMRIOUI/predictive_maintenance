@@ -1,0 +1,23 @@
+
+services:
+  api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: predictive_api_prod
+    ports:
+      - "8000:8000"
+    restart: always
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: predictive_frontend_prod
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://api:8000
+    depends_on:
+      - api
+    restart: always

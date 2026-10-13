@@ -45,7 +45,13 @@ class PredictionOutput(BaseModel):
     unit: int
     predicted_RUL: float          # champion model's point estimate
     safety_RUL: float             # conservative quantile-model bound — use THIS for grounding decisions, not predicted_RUL
-    health_score: float           # safety_RUL normalized to the training RUL cap, 0-100
+    health_score: float            # safety_RUL normalized to the training RUL cap, 0-100.
+                                    # Forced to 0.0 when out_of_distribution is True: the input
+                                    # looks unlike training data, so the score is worst-case, not
+                                    # computed — `status` names the real problem ("INVALID SENSOR
+                                    # DATA") instead of a generic low-health message. 0.0 (not
+                                    # null) so this row isn't invisible to a fleet table sorted
+                                    # or filtered by health_score.
     status: str                   # "Normal Operation" / "Schedule Inspection" / "IMMEDIATE GROUNDING"
     out_of_distribution: bool     # True if input looks unlike anything in training data
     ood_violation_ratio: float
