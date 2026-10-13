@@ -43,6 +43,7 @@ flowchart TD
     G --> N
     I --> N
     N --> O[api/main.py — FastAPI]
+    O <-->|API REST / JSON| P[Frontend — Streamlit Dashboard]
 ```
 
 ## Module responsibilities

@@ -33,6 +33,7 @@ from sklearn.model_selection import GroupKFold, GroupShuffleSplit
 
 from data_loader import clean_and_save_data
 from evaluation import (
+    check_quantile_crossing,
     compute_feature_reference_ranges,
     get_shap_explainer,
     nasa_score,
@@ -333,11 +334,35 @@ def main():
     model_safety, study_safety, safe_limit = train_safety_model(features, train_data, X_tr, y_tr, X_val, y_val, config)
     joblib.dump(model_safety, resolve(config["models"]["safety_model_path"]))
 
+    # Automated version of the check notebooks/02 only ever ran by hand
+    # ("WARNING: Safety limit too high" printed to a cell output nobody
+    # monitors in CI). Logged as real MLflow metrics so a crossing rate above
+    # threshold is visible in the MLflow UI / comparable across runs, not
+    # just caught if someone happens to re-read the notebook.
+    crossing = check_quantile_crossing(y_pred, safe_limit)
+    print(
+        f"[quantile-crossing] rate={crossing['crossing_rate']:.1%}  "
+        f"mean_buffer={crossing['mean_buffer']:.2f}  "
+        f"worst={crossing['worst_crossing']:.2f}  (n={crossing['n']})"
+    )
+    if crossing["crossing_rate"] > 0.0:
+        print(
+            f"[quantile-crossing] WARNING: safety_RUL exceeds predicted_RUL on "
+            f"{crossing['crossing_rate']:.1%} of test rows — the safety model is "
+            f"not conservative enough there. Consider lowering quantile_alpha, "
+            f"adding a monotonicity constraint, or rearranging predictions "
+            f"post-hoc (Chernozhukov et al. 2010) before relying on safety_RUL "
+            f"for grounding decisions in that regime."
+        )
+
     with mlflow.start_run(run_name="xgboost_safety_model") as run:
         safety_run_id = run.info.run_id
         mlflow.log_params(study_safety.best_params)
         mlflow.log_metric("cv_pinball_loss", study_safety.best_value)
         mlflow.log_metric("mean_safety_rul", float(np.mean(safe_limit)))
+        mlflow.log_metric("quantile_crossing_rate", crossing["crossing_rate"])
+        mlflow.log_metric("quantile_crossing_mean_buffer", crossing["mean_buffer"])
+        mlflow.log_metric("quantile_crossing_worst", crossing["worst_crossing"])
         mlflow.xgboost.log_model(model_safety, name="model")
 
     export_artifacts(

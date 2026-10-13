@@ -1,7 +1,6 @@
-version: '3.8'
 
 services:
-  # 1. Le Backend (FastAPI)
+  # 1. Backend (FastAPI)
   api:
     build: 
       context: .
@@ -10,19 +9,27 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ./api:/app/api          # Hot-reload for the API layer
+      - ./src:/app/src          # Hot-reload for core ML logic
       - ./models:/app/models
       - ./data:/app/data
       - ./configs:/app/configs
+    # Override default command to enable Uvicorn hot-reload in development
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 
-  # 2. Le Frontend (Streamlit)
+  # 2. Frontend (Streamlit)
   frontend:
     build:
       context: .
-      dockerfile: Dockerfile.streamlit # Nous allons créer ce fichier
+      dockerfile: Dockerfile.streamlit
     container_name: predictive_frontend
     ports:
       - "8501:8501"
+    volumes:
+      - ./app:/app/app          # Hot-reload for Streamlit dashboard
     environment:
-      - API_URL=http://api:8000 # C'est ici qu'on dit à Streamlit où se trouve l'API
+      - API_URL=http://api:8000
     depends_on:
-      - api # On demande à Docker de lancer l'API avant l'interface
+      - api
+    # Override default command to force file watching via polling
+    command: streamlit run app/streamlit_app.py --server.runOnSave true --server.fileWatcherType poll

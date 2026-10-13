@@ -14,6 +14,12 @@ RUN pip install --default-timeout=1000 --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# No `dvc pull` needed here, unlike the API's Dockerfile: this frontend only
+# talks to the API over HTTP (app/streamlit_app.py never calls joblib.load
+# or reads a DVC-tracked path directly) — it has nothing of its own that
+# config.yaml/dvc.lock track. Deploy the API image with its dvc pull step
+# applied, and point this container's API_URL env var at it.
+
 EXPOSE 8501
 
 # Start ONLY the Streamlit frontend
